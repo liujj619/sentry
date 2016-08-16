@@ -44,17 +44,17 @@ const IssuePlugin = React.createClass({
 
   getPluginCreateEndpoint() {
     return ('/issues/' + this.getGroup().id +
-            '/plugin/' + this.props.plugin.slug + '/create/');
+            '/plugins/' + this.props.plugin.slug + '/create/');
   },
 
   getPluginLinkEndpoint() {
     return ('/issues/' + this.getGroup().id +
-            '/plugin/' + this.props.plugin.slug + '/link/');
+            '/plugins/' + this.props.plugin.slug + '/link/');
   },
 
   getPluginUnlinkEndpoint() {
     return ('/issues/' + this.getGroup().id +
-            '/plugin/' + this.props.plugin.slug + '/unlink/');
+            '/plugins/' + this.props.plugin.slug + '/unlink/');
   },
 
   setError(error, defaultMessage) {
@@ -199,7 +199,7 @@ const IssuePlugin = React.createClass({
       case 'select':
         if (field.has_autocomplete) {
           props.url = ('/api/0/issues/' + this.getGroup().id +
-                       '/plugin/' + this.props.plugin.slug + '/autocomplete');
+                       '/plugins/' + this.props.plugin.slug + '/autocomplete');
           el = <Select2FieldAutocomplete {...props} />;
         } else {
           props.choices = field.choices;

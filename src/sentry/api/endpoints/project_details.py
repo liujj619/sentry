@@ -12,6 +12,7 @@ from sentry.api.base import DocSection
 from sentry.api.bases.project import ProjectEndpoint, ProjectPermission
 from sentry.api.decorators import sudo_required
 from sentry.api.serializers import serialize
+from sentry.app import digests
 from sentry.models import (
     AuditLogEntryEvent, Group, GroupStatus, Project, ProjectBookmark,
     ProjectStatus, UserOption
@@ -76,6 +77,13 @@ class ProjectAdminSerializer(serializers.Serializer):
     isSubscribed = serializers.BooleanField()
     name = serializers.CharField(max_length=200)
     slug = serializers.RegexField(r'^[a-z0-9_\-]+$', max_length=50)
+    digestsMinDelay = serializers.IntegerField(min_value=60, max_value=3600)
+    digestsMaxDelay = serializers.IntegerField(min_value=60, max_value=3600)
+
+    def validate_digestsMaxDelay(self, attrs, source):
+        if attrs[source] < attrs['digestsMinDelay']:
+            raise serializers.ValidationError('The maximum delay on digests must be higher than the minimum.')
+        return attrs
 
 
 class RelaxedProjectPermission(ProjectPermission):
@@ -119,16 +127,6 @@ class ProjectDetailsEndpoint(ProjectEndpoint):
         :pparam string project_slug: the slug of the project to delete.
         :auth: required
         """
-        active_plugins = [
-            {
-                'name': plugin.get_title(),
-                'id': plugin.slug,
-            }
-            for plugin in plugins.configurable_for_project(project, version=None)
-            if plugin.is_enabled(project)
-            and plugin.has_project_conf()
-        ]
-
         data = serialize(project, request.user)
         data['options'] = {
             'sentry:origins': '\n'.join(project.get_option('sentry:origins', ['*']) or []),
@@ -141,9 +139,27 @@ class ProjectDetailsEndpoint(ProjectEndpoint):
             'sentry:default_environment': project.get_option('sentry:default_environment'),
             'feedback:branding': project.get_option('feedback:branding', '1') == '1',
         }
-        data['activePlugins'] = active_plugins
+        data['plugins'] = [
+            {
+                'id': plugin.slug,
+                'name': plugin.get_title(),
+                'enabled': plugin.is_enabled(project),
+                'type': plugin.get_plugin_type(),
+                'canDisable': plugin.can_disable,
+            } for plugin in plugins.configurable_for_project(project, version=None)
+            if plugin.has_project_conf()
+        ]
         data['team'] = serialize(project.team, request.user)
         data['organization'] = serialize(project.organization, request.user)
+
+        data.update({
+            'digestsMinDelay': project.get_option(
+                'digests:mail:minimum_delay', digests.minimum_delay,
+            ),
+            'digestsMaxDelay': project.get_option(
+                'digests:mail:maximum_delay', digests.maximum_delay,
+            ),
+        })
 
         include = set(filter(bool, request.GET.get('include', '').split(',')))
         if 'stats' in include:
@@ -170,6 +186,8 @@ class ProjectDetailsEndpoint(ProjectEndpoint):
         :param boolean isBookmarked: in case this API call is invoked with a
                                      user context this allows changing of
                                      the bookmark flag.
+        :param int digestsMinDelay:
+        :param int digestsMaxDelay:
         :param object options: optional options to override in the
                                project settings.
         :auth: required
@@ -217,6 +235,11 @@ class ProjectDetailsEndpoint(ProjectEndpoint):
                 user=request.user,
             ).delete()
 
+        if result.get('digestsMinDelay'):
+            project.update_option('digests:mail:minimum_delay', result['digestsMinDelay'])
+        if result.get('digestsMaxDelay'):
+            project.update_option('digests:mail:maximum_delay', result['digestsMaxDelay'])
+
         if result.get('isSubscribed'):
             UserOption.objects.set_value(request.user, project, 'mail:alert', 1)
         elif result.get('isSubscribed') is False:
@@ -262,6 +285,15 @@ class ProjectDetailsEndpoint(ProjectEndpoint):
             'sentry:origins': '\n'.join(project.get_option('sentry:origins', ['*']) or []),
             'sentry:resolve_age': int(project.get_option('sentry:resolve_age', 0)),
         }
+        data.update({
+            'digestsMinDelay': project.get_option(
+                'digests:mail:minimum_delay', digests.minimum_delay,
+            ),
+            'digestsMaxDelay': project.get_option(
+                'digests:mail:maximum_delay', digests.maximum_delay,
+            ),
+        })
+
         return Response(data)
 
     @attach_scenarios([delete_project_scenario])
