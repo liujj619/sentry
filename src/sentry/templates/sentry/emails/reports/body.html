@@ -121,6 +121,13 @@
     </tbody>
   </table>
 
+  <h4>Most Active Releases {{ duration.noun|title }}</h4>
+  <ol>
+    {% for release, count in report.release_list %}
+      <li>{{ release.version }} in {{ release.project.name }}: {{ count }} event{{ count|pluralize }}</li>
+    {% endfor %}
+  </ol>
+
   {% if personal.resolved or personal.users %}
     <h4>Your impact</h4>
     <table class="user-impact">

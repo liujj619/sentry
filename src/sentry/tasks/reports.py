@@ -15,7 +15,7 @@ from sentry import features
 from sentry.app import tsdb
 from sentry.models import (
     Activity, Group, GroupStatus, Organization, OrganizationStatus, Project,
-    Team, User, UserOption,
+    Release, Team, User, UserOption,
 )
 from sentry.tasks.base import instrumented_task
 from sentry.utils import json, redis
@@ -259,6 +259,14 @@ def merge_issue_lists(target, other):
     )
 
 
+def trim_release_list(value):
+    return sorted(
+        value,
+        key=lambda (id, count): count,
+        reverse=True,
+    )[:10]
+
+
 def prepare_project_report(interval, project):
     return (
         prepare_project_series(interval, project),
@@ -388,6 +396,7 @@ def merge_reports(target, other):
             target[2],
             other[2],
         ),
+        trim_release_list(target[3] + other[3]),
     )
 
 
@@ -593,11 +602,21 @@ def rewrite_issue_list((count, issues), fetch_groups=None):
     )
 
 
+def rewrite_release_list(data, fetch_releases=None):
+    # XXX: This only exists for removing data dependency in tests.
+    if fetch_releases is None:
+        fetch_releases = Release.objects.in_bulk
+
+    instances = fetch_releases([id for id, count in data])
+
+    return [(instances[id], count) for id, count in data]
+
+
 Point = namedtuple('Point', 'resolved unresolved')
 
 
-def to_context(report, fetch_groups=None):
-    series, aggregates, issue_list = report
+def to_context(report, fetch_groups=None, fetch_releases=None):
+    series, aggregates, issue_list, release_list = report
     series = [(timestamp, Point(*values)) for timestamp, values in series]
 
     return {
@@ -617,5 +636,9 @@ def to_context(report, fetch_groups=None):
         'issue_list': rewrite_issue_list(
             issue_list,
             fetch_groups,
+        ),
+        'release_list': rewrite_release_list(
+            release_list,
+            fetch_releases,
         ),
     }
